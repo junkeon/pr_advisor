@@ -64,6 +64,8 @@ class PR_Advisor:
         for pr in prs_res:
             pr_list.append((pr["number"], pr["title"]))
 
+        print()
+
         return pr_list
 
     def get_pr_info(self, pr_number):
