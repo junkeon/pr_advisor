@@ -1,8 +1,8 @@
 import copy
 import json
+import logging
 import os
 import time
-from datetime import datetime
 
 import requests
 from dotenv import load_dotenv
@@ -12,7 +12,11 @@ from response_schema import output_parser, prompt
 
 load_dotenv()
 
-TIME_SLEEP = 60 * 10  # 10 minutes
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] (%(levelname)s) : %(message)s",
+    handlers=[logging.FileHandler("pr_advisor.log"), logging.StreamHandler()],
+)
 
 
 class PR_Advisor:
@@ -36,10 +40,10 @@ class PR_Advisor:
         if os.path.exists(history_file_path):
             with open(history_file_path, "r") as file:
                 history = json.load(file)
-            print("> Success to load history")
+            logging.info("Success to load history")
         else:
             history = {}
-            print("> No history file")
+            logging.info("No history file")
 
         return history
 
@@ -52,7 +56,7 @@ class PR_Advisor:
         )
 
         if response.status_code == 200:
-            print("> Success to get pr list")
+            logging.info("Success to get pr list")
         elif response.status_code == 404:
             raise Exception(f"Failed to get pr list: {response.status_code}")
         else:
@@ -64,8 +68,6 @@ class PR_Advisor:
         for pr in prs_res:
             pr_list.append((pr["number"], pr["title"]))
 
-        print()
-
         return pr_list
 
     def get_pr_info(self, pr_number):
@@ -75,7 +77,7 @@ class PR_Advisor:
         response = requests.get(f"{self.url}/pulls/{pr_number}", headers=headers)
 
         if response.status_code == 200:
-            print("> Success to get pr info")
+            logging.info("Success to get pr info")
         elif response.status_code == 404:
             raise Exception(f"PR {pr_number} is not found")
         else:
@@ -95,7 +97,7 @@ class PR_Advisor:
         response = requests.get(f"{self.url}/pulls/{pr_number}/files", headers=headers)
 
         if response.status_code == 200:
-            print("> Success to get pr diff")
+            logging.info("Success to get pr diff")
         elif response.status_code == 404:
             raise Exception(f"PR {pr_number} is not found")
         else:
@@ -108,7 +110,7 @@ class PR_Advisor:
         if len(diff_res) > 100:
             raise Exception("Too many diffs")
 
-        print(f"> Number of diffs: {len(diff_res)}")
+        logging.info(f"Number of diffs: {len(diff_res)}")
 
         total_diff = ""
         for diff in diff_res:
@@ -127,7 +129,7 @@ class PR_Advisor:
 
         response = chain.invoke({"title": title, "body": body, "diff": diff})
 
-        str_response = "Automated Review Comment by Solar:\n\n"
+        str_response = ""
         for key, value in response.items():
             str_response += f"- {key.replace('_', ' ').capitalize()}: {value}\n"
 
@@ -141,7 +143,7 @@ class PR_Advisor:
         headers = copy.deepcopy(self.headers)
         headers["Accept"] = "application/vnd.github+json"
 
-        comment_body = {"body": f"Automated Review Comment:\n\n{comment}"}
+        comment_body = {"body": f"Automated Review Comment by Solar:\n\n{comment}"}
 
         response = requests.post(
             f"{self.url}/issues/{pr_number}/comments",
@@ -152,31 +154,32 @@ class PR_Advisor:
         if response.status_code != 201:
             raise Exception(f"Failed to create comment: {response.status_code}")
 
-        print("> Success create comment")
+        logging.info("Success create comment")
 
     def save_history(self):
         with open(self.history_file_path, "w") as file:
             json.dump(self.history, file, indent=4, ensure_ascii=False)
 
-        print("> Success save history")
+        logging.info("Success save history")
 
     def run(self):
         pr_list = self.get_pr_list()
-        print(f"> Number of open PRs: {len(pr_list)}")
+        logging.info(f"Number of open PRs: {len(pr_list)}")
+        print()
 
         nothing_to_review = True
 
         for pr_number, title in pr_list:
             if str(pr_number) not in self.history:
                 nothing_to_review = False
-                print(f"> PR {pr_number} [{title}] is not in history")
+                logging.info(f"PR {pr_number} [{title}] is not in history")
 
                 try:
                     comment = self.get_llm_comment(pr_number)
-                    self.create_comment(pr_number, comment, True)
+                    self.create_comment(pr_number, comment)
 
                 except Exception as e:
-                    print(e)
+                    logging.error(e)
 
                 finally:
                     self.history[str(pr_number)] = title
@@ -185,14 +188,30 @@ class PR_Advisor:
                     time.sleep(10)
 
         if nothing_to_review:
-            print("> Nothing to review")
+            logging.info("Nothing to review")
+            print()
 
     def run_periodically(self):
+        if os.getenv("TIME_SLEEP"):
+            time_sleep_str = os.getenv("TIME_SLEEP")
+            logging.info(f"Load TIME_SLEEP: {time_sleep_str}")
+            if time_sleep_str.endswith("s"):
+                time_sleep = int(time_sleep_str[:-1])
+            elif time_sleep_str.endswith("m"):
+                time_sleep = int(time_sleep_str[:-1]) * 60
+            elif time_sleep_str.endswith("h"):
+                time_sleep = int(time_sleep_str[:-1]) * 3600
+            else:
+                raise Exception("Invalid TIME_SLEEP")
+        else:
+            time_sleep = 60 * 10  # default 10 minutes
+            logging.info(f"No TIME_SLEEP, use default {time_sleep} seconds")
+
+        print()
+
         while True:
-            print()
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Start running")
             self.run()
-            time.sleep(TIME_SLEEP)
+            time.sleep(time_sleep)
 
 
 if __name__ == "__main__":
