@@ -6,12 +6,13 @@ from datetime import datetime
 
 import requests
 from dotenv import load_dotenv
-from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_upstage import ChatUpstage
+
+from response_schema import output_parser, prompt
 
 load_dotenv()
 
-TIME_SLEEP = 60
+TIME_SLEEP = 60 * 10  # 10 minutes
 
 
 class PR_Advisor:
@@ -61,7 +62,7 @@ class PR_Advisor:
 
         pr_list = []
         for pr in prs_res:
-            pr_list.append(pr["number"])
+            pr_list.append((pr["number"], pr["title"]))
 
         return pr_list
 
@@ -117,29 +118,24 @@ class PR_Advisor:
     def get_llm_comment(self, pr_number):
         title, body, diff = self.get_pr_info(pr_number)
 
-        messages = [
-            SystemMessage(
-                content="You are an experienced software engineer with a strong ability to provide valuable feedback on code improvements. \
-                    Please review the PR and provide a detailed comment in Korean, following these guidelines:\
-                    PR 요약: 이 PR의 목표와 주요 변경 사항을 명확하게 요약해 주세요. \
-                    코드 가독성 및 유지보수성: 코드가 이해하기 쉽고 명확하게 작성되었는지 평가해 주세요. 변수명, 함수명, 주석이 적절한지, 그리고 코드 구조가 유지보수에 용이하게 작성되었는지 언급해 주세요. \
-                    기능적 정확성 및 테스트: 코드가 예상대로 동작할 가능성이 있는지 평가하고, 필요한 테스트가 충분히 포함되었는지, 추가로 필요한 테스트가 있는지 설명해 주세요. \
-                    성능 고려사항: 코드가 성능에 어떤 영향을 미칠지 평가해 주세요. 성능 저하의 가능성이 있거나 최적화가 필요한 부분이 있는지 언급해 주세요. \
-                    보안 검토: 코드에 보안 취약점이 없는지 확인해 주세요. 특히, 토큰, 인증키 등이 포함되지는 않는지 확인해주세요. \
-                    리뷰 중점 사항 : 다른 사람들이 집중해서 확인해야 하는 사항을 언급해주세요. \
-                    건설적인 피드백 제공: 코드의 장점을 칭찬하고, 개선이 필요한 부분에 대해 건설적인 제안을 제공해 주세요. 필요한 경우, 더 나은 방법을 제시할 수 있는 질문을 추가해 주세요. \
-                    위 지침에 따라 간결하고 명확한 코멘트를 작성해 주세요.",
-            ),
-            HumanMessage(
-                content=f"PR title: {title}\nPR body: {body}\nPR diff: {diff}"
-            ),
-        ]
+        if "Bump" in title:
+            raise Exception("Bump PR")
 
-        response = self.chat.invoke(messages)
+        chain = prompt | self.chat | output_parser
 
-        return title, response.content
+        response = chain.invoke({"title": title, "body": body, "diff": diff})
 
-    def create_comment(self, pr_number, comment):
+        str_response = "Automated Review Comment by Solar:\n\n"
+        for key, value in response.items():
+            str_response += f"- {key.replace('_', ' ').capitalize()}: {value}\n"
+
+        return str_response.strip()
+
+    def create_comment(self, pr_number, comment, just_print=False):
+        if just_print:
+            print(comment)
+            return
+
         headers = copy.deepcopy(self.headers)
         headers["Accept"] = "application/vnd.github+json"
 
@@ -168,17 +164,23 @@ class PR_Advisor:
 
         nothing_to_review = True
 
-        for pr_number in pr_list:
+        for pr_number, title in pr_list:
             if str(pr_number) not in self.history:
                 nothing_to_review = False
-                print(f"> PR {pr_number} is not in history")
+                print(f"> PR {pr_number} [{title}] is not in history")
 
-                title, comment = self.get_llm_comment(pr_number)
-                self.create_comment(pr_number, comment)
-                self.history[str(pr_number)] = title
-                self.save_history()
-                print()
-                time.sleep(10)
+                try:
+                    comment = self.get_llm_comment(pr_number)
+                    self.create_comment(pr_number, comment, True)
+
+                except Exception as e:
+                    print(e)
+
+                finally:
+                    self.history[str(pr_number)] = title
+                    self.save_history()
+                    print()
+                    time.sleep(10)
 
         if nothing_to_review:
             print("> Nothing to review")
