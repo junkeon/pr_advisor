@@ -4,12 +4,14 @@ from langchain_upstage import ChatUpstage
 
 
 class LLMAdvisor:
-    def __init__(self, model="Solar", api_key=None):
+    def __init__(self, model="Solar", llm_api_key=None):
 
         if model == "Solar":
-            self.chat = ChatUpstage(api_key=api_key, temperature=0)
+            self.chat = ChatUpstage(api_key=llm_api_key, temperature=0)
         else:
             raise ValueError(f"{model} is not supported model")
+
+        self.model = model
 
         response_schemas = [
             ResponseSchema(

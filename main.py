@@ -23,7 +23,7 @@ class PR_Advisor:
         REPO_OWNER = os.getenv("REPO_OWNER")
         REPO_NAME = os.getenv("REPO_NAME")
         GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-        UPSTAGE_API_KEY = os.getenv("UPSTAGE_API_KEY")
+        LLM_API_KEY = os.getenv("LLM_API_KEY")
         self.history_file_path = os.getenv("HISTORY_FILE_PATH")
 
         self.url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}"
@@ -31,7 +31,7 @@ class PR_Advisor:
             "Authorization": f"Bearer {GITHUB_TOKEN}",
         }
         self.llm_model = "Solar"
-        self.llm_advisor = LLMAdvisor(model=self.llm_model, api_key=UPSTAGE_API_KEY)
+        self.llm_advisor = LLMAdvisor(model=self.llm_model, api_key=LLM_API_KEY)
         self.history = self.load_history(self.history_file_path)
 
     def load_history(self, history_file_path):
