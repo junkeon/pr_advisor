@@ -6,9 +6,8 @@ import time
 
 import requests
 from dotenv import load_dotenv
-from langchain_upstage import ChatUpstage
 
-from response_schema import output_parser, prompt
+from response_schema import LLMAdvisor
 
 load_dotenv()
 
@@ -31,8 +30,8 @@ class PR_Advisor:
         self.headers = {
             "Authorization": f"Bearer {GITHUB_TOKEN}",
         }
-
-        self.chat = ChatUpstage(api_key=UPSTAGE_API_KEY)
+        self.llm_model = "Solar"
+        self.llm_advisor = LLMAdvisor(model=self.llm_model, api_key=UPSTAGE_API_KEY)
         self.history = self.load_history(self.history_file_path)
 
     def load_history(self, history_file_path):
@@ -125,15 +124,11 @@ class PR_Advisor:
         if "Bump" in title:
             raise Exception("Bump PR")
 
-        chain = prompt | self.chat | output_parser
+        comment = self.llm_advisor.get_response(
+            {"title": title, "body": body, "diff": diff}
+        )
 
-        response = chain.invoke({"title": title, "body": body, "diff": diff})
-
-        str_response = ""
-        for key, value in response.items():
-            str_response += f"- {key.replace('_', ' ').capitalize()}: {value}\n"
-
-        return str_response.strip()
+        return comment
 
     def create_comment(self, pr_number, comment, just_print=False):
         if just_print:
@@ -143,7 +138,9 @@ class PR_Advisor:
         headers = copy.deepcopy(self.headers)
         headers["Accept"] = "application/vnd.github+json"
 
-        comment_body = {"body": f"Automated Review Comment by Solar:\n\n{comment}"}
+        comment_body = {
+            "body": f"Automated Review Comment by {self.llm_model}:\n\n{comment}"
+        }
 
         response = requests.post(
             f"{self.url}/issues/{pr_number}/comments",
